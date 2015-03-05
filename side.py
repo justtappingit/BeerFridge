@@ -29,14 +29,14 @@ class Cycle:
 		if self.count == 0:
 			return 0.0
 		else:
-			return float(self.totalTemp)/count
+			return float(self.totalTemp)/self.count
 	def avgCycleTime(self):
 		if self.count == 0:
 			return 0.0
 		else:
-			return float(self.totalTime)/count
+			return float(self.totalTime)/self.count
 	def avgTempChangeRate(self):
-		if self.count == 0:
+		if self.count == 0 or self.totalTime == 0:
 			return 0.0
 		else:
 			return float(self.totalTemp)/self.totalTime
@@ -48,23 +48,39 @@ class Cycle:
 class Side:
 	on = 1
 	off = 0
-	active = False 
-	variance = 0
-	target = 0
-	cutOff = 0
-	cycle = Cycle()
 	currTime = 0
 	currTemp = 0
-	relayState = -1
 	def __init__(self,name, side, relay):
 		self.mySide = side
 		self.name = name
 		self.relay = relay
+		self.cycle = Cycle()
+		self.relayState  = -1
+		self.cutOff = 0
+		self.target = 0
+		self.variance = 0
+		self.active = False;
+	
+
+	def getReport(self):
+		report = ""
+		report += "Target: "+str(self.target)+ " "
+		report += "Variance: "+str(self.variance)+" "
+		report += "Active: "+str(self.active)+" "
+		report += "Cycles: "+str(self.cycle.count)+" "
+		report += "Uptime: "+str(self.getUpTime())+" "
+		report += "Downtime: "+str(self.getDownTime())+" "
+		report += "LastCycleTime: "+str(self.getCycleTime())+" "
+		report += "AvgCycleTime: "+str(self.cycle.avgCycleTime())+" "
+		report += "AvgCycleChange: "+str(self.cycle.avgCycleTempChange())+" "
+		report += "AvgRateChange: "+str(self.cycle.avgTempChangeRate())+" "
+		return report
+		
 
 	def printSide(self):
 		print str(self.mySide)
 
-	def getLastOff():
+	def getLastOff(self):
 		return self.cycle.stopTime
 
 	def stateSync(self):

@@ -3,6 +3,7 @@ import time
 import sys,traceback
 import logging
 
+from command_server import myServer
 from side import Side
 #/sys/bus/w1/devices/28-0000066eb94b/value #air temp
 #/sys/bus/w1/devices/28-00000670579a/value #beer temp
@@ -22,8 +23,9 @@ hotSide = Side("HOT",1, heatRelay)
 coldSide.setTempBands(targetTemp, tempRange, graceDistance) #Set initial temperature rules, can change during cycle
 hotSide.setTempBands(targetTemp, tempRange, graceDistance)
 
-
 run = True
+stop = False
+
 airProbe = "28-0000066eb94b" #Serial number for temp sensor
 beerProbe = "28-00000670579a" #Serial number for temp sensor
 
@@ -58,7 +60,7 @@ def runSide(side, otherSide):
 	else:
 		if side.shouldActivate():
 			if side.getDownTime() < 10:
-				log("WARNING "+side.name+" is attempting to flash")
+				log("WARNING "+side.name+" is attempting to flash "+str(side.currTime)+" "+str(side.cycle.stopTime))
 				return True
 			if otherSide.active:
 				log("WARNING "+side.name+" activating with other side on, turning off other side")
@@ -67,15 +69,105 @@ def runSide(side, otherSide):
 			side.activate()
 			return True
 
+def getReport(coldSide, hotSide):
+	report =""
+	report += "CurrTemp: "+str(coldSide.currTemp)+"\n"
+	report += "Cold: \n"+coldSide.getReport()+"\n"
+	report += "Hot: \n"+hotSide.getReport()+"\n"
+	report +="Stopped: "+str(stop)+" "
+	report += "LastAction Mins ago: "+str((coldSide.currTime-max(coldSide.getLastOff(), hotSide.getLastOff()))/60)
+	return report
+
+def handleCommands(comServ, coldSide, hotSide):
+	global run, stop
+	try:
+		while len(comServ.commands) > 0:
+			command  = comServ.commands.popleft().strip()
+			log("Processing command: "+command)
+			comArray = command.strip().split(" ")
+			if len(comArray) == 0:
+				log("Bad command parse")
+				continue
+			com = str(comArray[0].strip())
+			if com == "r" or com =="d":
+				log("Report")
+				r = ""
+				r = getReport(coldSide, hotSide)
+				log(r)
+				comServ.sendMessage(r)
+			elif com == "D":
+				log("Disable")
+				run = False
+			elif com == "set":
+				log("Set temp")
+				if len(comArray) < 2:
+					comServ.sendMessage("Must incldue temp")
+				else:
+					t = float(comArray[1])
+					coldSide.target = t
+					hotSide.target = t
+					comServ.sendMessage("Temp set to "+str(t))
+					log("Temp set "+str(t))
+				
+			elif com == "w":
+				log("Set width")
+                                if len(comArray) < 2:
+                                        comServ.sendMessage("Must incldue variance")
+                                else:
+                                        t = float(comArray[1])
+                                        coldSide.variance = t
+                                        hotSide.variance = t
+                                        log("Variance set "+str(t))
+					comServ.sendMessage("Width set to "+str(t))
+			elif com == "stop":
+				log("Stopping from command")
+				stop= True
+				comServ.sendMessage("Stopping")
+			elif com == "start":
+				log("Starting from command")
+				stop = False
+				comServ.sendMessage("Starting")
+				
+			elif com == "?":
+				log("Command list")
+				s=""
+				s+="r (report status of heating cooling temp and settings)\n"
+				s+="d (report status of heating cooling temp and settings)\n"
+				s+="D (disable and shut down)\n"
+				s+="set [temp] (change the target tempature to temp)\n"
+				s+="w [width] (set the variance width in degreess to width)\n"
+				s+="stop (stop heating and cooling, shut off relays)\n"
+				s+="start (start heating cooling)\n"
+				comServ.sendMessage(s)
+			else:
+				log("unknown command: "+com)
+
+	except:
+		log("Bad command! ")
+		log(str(sys.exc_info()[0]))
+		traceback.print_exc(file=sys.stdout)
+
+
+commandServer = myServer(logging)
 
 try:
+ commandServer.start()
  while(run):
 	currAirTemp = getTemp(airProbe)
 	currBeerTemp = getTemp(beerProbe)
 	currTime = int(time.time())
 	coldSide.setUpdateValues(currTime, currAirTemp)
 	hotSide.setUpdateValues(currTime, currAirTemp)
-
+	
+	handleCommands(commandServer, coldSide, hotSide)
+	if stop:
+		if coldSide.active:
+			coolSide.deactivate()
+		if hotSide.active:
+			hotSide.deactivate()
+		log("Stopped")
+		time.sleep(2)
+		continue
 	if coldSide.active and hotSide.active:
 		log("You royally messed up!")
 		run = False
@@ -86,16 +178,22 @@ try:
 		continue
 
 
-	if runSide(hotSide, coldSide) or runSide(coldSide, hotSide):
+	if runSide(hotSide, coldSide):
+		time.sleep(2)
+		continue
+	if runSide(coldSide, hotSide):
 		time.sleep(2)
 		continue
 
-	log("Nothing to do. Mins since last stop action: " + str(currTime-max(coldSide.getLastOff(), hotSide.getLastOff())/60)+" Temp: "+str(currAirTemp)+" Heat: "+str(heatState)+" Cold: "+str(coldState))
+	log("Nothing to do. Mins since last stop action: " + str((currTime-max(coldSide.getLastOff(), hotSide.getLastOff()))/60)+" Temp: "+str(currAirTemp)+" Heat: "+str(hotSide.relayState)+" Cold: "+str(coldSide.relayState))
 	time.sleep(2)
 
 except: #Catch everything we can so we gracefully shutdown 
  print "Unexpected error: "+str(sys.exc_info()[0])
  traceback.print_exc(file=sys.stdout)
  allOff()
+ commandServer.shutdown()
+ 
 
 allOff() # Program end turn off everyhing
+commandServer.shutdown()
