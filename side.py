@@ -49,6 +49,7 @@ class Cycle:
 class Side:
 	on = 1
 	off = 0
+	fastCutOff = 2
 	currTime = 0
 	currTemp = 0
 	beerTemp = 0 
@@ -131,10 +132,14 @@ class Side:
 		self.variance = varTemp
 		self.cutOff = cut
 
+	def useMyAdjustedTemp(self):
+		tempDist = self.fastTempDistance()#Get how far the temp is out of range
+		return tempDist > self.fastCutOff
+
 	def getFastAdjustedTargetTemp(self):
 		tempDist = self.fastTempDistance()#Get how far the temp is out of range
                 adjust = 0
-                if tempDist > 2: #we are more than x degrees outside of the target range
+                if tempDist > self.fastCutOff: #we are more than x degrees outside of the target range
                         adjust = self.fastTempAdjustment(tempDist)#calc how much to move the air temp 
                         if adjust < 0 :
                                 self.log("WARNING!!! adjust is negative!!!!!!1111!!!")
@@ -149,20 +154,19 @@ class Side:
                         adjustedTargetTemp = 105
 		#-----
                 if tempDist > 1: #This is a duplicate check for the purpose of logging
-                        self.log("Temp out of range running fast adjust " + self.name)
-                        self.log("Temp dist "+str(tempDist)+" adjust "+ str(adjust)+" AdjustedTemp "+str(adjustedTargetTemp)+" air "+str(self.currTemp)+" beer "+str(self.beerTemp)+" target "+str(self.target))
+                        self.log("Temp dist "+str(tempDist)+" adjust "+ str(adjust)+" AdjustedTemp "+str(adjustedTargetTemp)+" air "+str(self.currTemp)+" beer "+str(self.beerTemp)+" target "+str(self.target)+" "+self.name)
 		return adjustedTargetTemp
-	def shouldActivate(self):
+	def shouldActivate(self, adjustedTargetTemp):
 		if self.target == 0:
 			print "Activate not set!"
 			return False
-		adjustedTargetTemp = self.getFastAdjustedTargetTemp()
+		#adjustedTargetTemp = self.getFastAdjustedTargetTemp()
 		return self.mySide*(adjustedTargetTemp - self.currTemp) > self.variance and not(self.active)
 
 
 
-	def shouldDeactivate(self):
-		adjustedTargetTemp = self.getFastAdjustedTargetTemp()
+	def shouldDeactivate(self, adjustedTargetTemp):
+		#adjustedTargetTemp = self.getFastAdjustedTargetTemp()
 		return (-1*self.mySide)*(adjustedTargetTemp-self.currTemp) >= (self.variance - self.cutOff) and (self.active)#using the inverse to persist var-cutoff form
 		
 

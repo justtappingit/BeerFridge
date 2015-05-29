@@ -51,8 +51,18 @@ def allOff():
 	hotSide.setRelay(0)
 
 def runSide(side, otherSide):
+
+	#Determine if one side is going to fast adjust, calc act/decact on that base
+	if side.useMyAdjustedTemp() and otherSide.useMyAdjustedTemp():
+		log("WARNING!! BOTH SIDES WANT TO FAST ADJUST!!")
+		adjustedTarget = side.getFastAdjustedTargetTemp()
+	elif otherSide.useMyAdjustedTemp():
+		adjustedTarget = otherSide.getFastAdjustedTargetTemp()
+	else:
+		adjustedTarget = side.getFastAdjustedTargetTemp()
+
 	if side.active:
-		if side.shouldDeactivate():
+		if side.shouldDeactivate(adjustedTarget):
 			side.deactivate()	
 			log("Turning off "+side.name+" currentTemp "+str(side.currTemp)+" uptime: "+str(side.getCycleTime())+" Diff: "+str(side.getCycleTempDiff()))
 			return True
@@ -61,7 +71,7 @@ def runSide(side, otherSide):
 			return True
 
 	else:
-		if side.shouldActivate():
+		if side.shouldActivate(adjustedTarget):
 			if side.getDownTime() < 10:
 				log("WARNING "+side.name+" is attempting to flash "+str(side.currTime)+" "+str(side.cycle.stopTime))
 				return True
