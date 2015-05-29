@@ -1,5 +1,6 @@
 #! /usr/bin/python
-
+import math
+import time
 class Cycle:
 	count = 0
 	startTemp = 0
@@ -50,8 +51,10 @@ class Side:
 	off = 0
 	currTime = 0
 	currTemp = 0
-	def __init__(self,name, side, relay):
+	beerTemp = 0 
+	def __init__(self,name, side, relay, logger):
 		self.mySide = side
+		self.myOppSide = -1*side
 		self.name = name
 		self.relay = relay
 		self.cycle = Cycle()
@@ -60,6 +63,7 @@ class Side:
 		self.target = 0
 		self.variance = 0
 		self.active = False;
+		self.logger = logger
 	
 
 	def getReport(self):
@@ -76,6 +80,22 @@ class Side:
 		report += "AvgRateChange: "+str(self.cycle.avgTempChangeRate())+" "
 		return report
 		
+
+	
+	def log(self,line):
+        	logline = time.ctime()+" "+line
+	        print logline
+	        self.logger.info(logline)
+
+
+	def fastTempDistance(self):
+		tempDistFromRange = self.beerTemp*self.myOppSide + (self.mySide*(self.target + (self.myOppSide*self.variance)))
+		return tempDistFromRange
+
+	def fastTempAdjustment(self, tempDistFromRange):
+		adjustment = math.pow(1+math.log(tempDistFromRange),2)
+		return adjustment
+
 
 	def printSide(self):
 		print str(self.mySide)
@@ -97,9 +117,10 @@ class Side:
 	def getDownTime(self):
 		return self.currTime - self.cycle.stopTime
 	
-	def setUpdateValues(self, time, temp):
+	def setUpdateValues(self, time, temp, beerTemp):
 		self.currTime = time
 		self.currTemp = temp
+		self.beerTemp = beerTemp
 		self.relayState = self.getRelayState()
 
 	def getTempChangeDiff(self, start, stop):
@@ -110,15 +131,39 @@ class Side:
 		self.variance = varTemp
 		self.cutOff = cut
 
+	def getFastAdjustedTargetTemp(self):
+		tempDist = self.fastTempDistance()#Get how far the temp is out of range
+                adjust = 0
+                if tempDist > 2: #we are more than x degrees outside of the target range
+                        adjust = self.fastTempAdjustment(tempDist)#calc how much to move the air temp 
+                        if adjust < 0 :
+                                self.log("WARNING!!! adjust is negative!!!!!!1111!!!")
+				adjust= 0
+                adjustedTargetTemp = self.target + (self.mySide * adjust) #calc target air temp
+		#Safety checks----
+                if adjustedTargetTemp < 28:
+                        self.log("WARNING ADJUSTED TEMP BELOW 28!!!! "+self.name)
+                        adjustedTargetTemp = 28
+                if adjustedTargetTemp > 105 :
+                        self.log("WARNING ADJUSTED TEMP ABOVE 105!!!! " +self.name)
+                        adjustedTargetTemp = 105
+		#-----
+                if tempDist > 1: #This is a duplicate check for the purpose of logging
+                        self.log("Temp out of range running fast adjust " + self.name)
+                        self.log("Temp dist "+str(tempDist)+" adjust "+ str(adjust)+" AdjustedTemp "+str(adjustedTargetTemp)+" air "+str(self.currTemp)+" beer "+str(self.beerTemp)+" target "+str(self.target))
+		return adjustedTargetTemp
 	def shouldActivate(self):
 		if self.target == 0:
 			print "Activate not set!"
 			return False
-		#print str(self.mySide) + " "+str(self.target)+ " "+str(sampledTemp)+" "+str(self.variance)
-		return self.mySide*(self.target - self.currTemp) > self.variance and not(self.active)
+		adjustedTargetTemp = self.getFastAdjustedTargetTemp()
+		return self.mySide*(adjustedTargetTemp - self.currTemp) > self.variance and not(self.active)
+
+
 
 	def shouldDeactivate(self):
-		return (-1*self.mySide)*(self.target-self.currTemp) >= (self.variance - self.cutOff) and (self.active)#using the inverse to persist var-cutoff form
+		adjustedTargetTemp = self.getFastAdjustedTargetTemp()
+		return (-1*self.mySide)*(adjustedTargetTemp-self.currTemp) >= (self.variance - self.cutOff) and (self.active)#using the inverse to persist var-cutoff form
 		
 
 	def activate(self):
@@ -130,6 +175,7 @@ class Side:
 		self.active = False
 		diff = self.getTempChangeDiff(self.cycle.startTemp, self.currTemp)
 		self.cycle.stop(self.currTime, diff)
+		self.adjust = 0
 		self.setRelay(self.off)
 
 	def setRelay(self, val):

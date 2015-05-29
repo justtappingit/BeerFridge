@@ -2,6 +2,7 @@
 import time
 import sys,traceback
 import logging
+import math
 
 from command_server import myServer
 from side import Side
@@ -9,16 +10,17 @@ from side import Side
 #/sys/bus/w1/devices/28-00000670579a/value #beer temp
 
 logging.basicConfig(filename="/home/pi/beer_fridge/logFile.log",level=logging.DEBUG)
-targetTemp = 80 
-desiredTemp = targetTemp 	#Adjuted desired temp of the beer and base temp for air temp
+logger = logging.getLogger(__name__)
+
+targetTemp = 66 
 graceDistance = .75		#Temp to turn off the elements inside of bands 
-tempRange = 2			#Bracket of acceptable air temp	
+tempRange = 1		#Bracket of acceptable air temp	
 
-heatRelay = 17 #GPIO pin number
-coldRelay = 27 #GPIO pin number
+heatRelay = 27 #GPIO pin number
+coldRelay = 17 #GPIO pin number
 
-coldSide = Side("COLD",-1, coldRelay)
-hotSide = Side("HOT",1, heatRelay)
+coldSide = Side("COLD",-1, coldRelay, logger)
+hotSide = Side("HOT",1, heatRelay, logger)
 
 coldSide.setTempBands(targetTemp, tempRange, graceDistance) #Set initial temperature rules, can change during cycle
 hotSide.setTempBands(targetTemp, tempRange, graceDistance)
@@ -31,7 +33,7 @@ beerProbe = "28-00000670579a" #Serial number for temp sensor
 
 
 def getTemp(name):
-	file=open("/sys/bus/w1/devices/"+airProbe+"/w1_slave","r")
+	file=open("/sys/bus/w1/devices/"+name+"/w1_slave","r")
 	file.readline().strip()
 	line = file.readline().strip().split()
 	temp = (float(line[len(line)-1].split("=")[1])/1000)*(9.0/5.0)+32
@@ -41,7 +43,8 @@ def getTemp(name):
 def log(line):
 	logline = time.ctime()+" "+line
 	print logline
-	logging.info(logline)
+	#logging.info(logline)
+	logger.info(logline)
 
 def allOff():
 	coldSide.setRelay(0)
@@ -54,7 +57,7 @@ def runSide(side, otherSide):
 			log("Turning off "+side.name+" currentTemp "+str(side.currTemp)+" uptime: "+str(side.getCycleTime())+" Diff: "+str(side.getCycleTempDiff()))
 			return True
 		else:
-			log("Continuing "+side.name+"  temnp "+str(side.currTemp)+" uptime "+str(side.getUpTime()))
+			log("Continuing "+side.name+"  air temp "+str(side.currTemp)+" beer temp "+str(side.beerTemp)+" uptime "+str(side.getUpTime()))
 			return True
 
 	else:
@@ -65,7 +68,7 @@ def runSide(side, otherSide):
 			if otherSide.active:
 				log("WARNING "+side.name+" activating with other side on, turning off other side")
 				otherSide.deactivate()
-			log("Activating "+side.name+" current temp: "+str(side.currTemp))
+			log("Activating "+side.name+" current temp: "+str(side.currTemp)+" Target:"+str(side.target))
 			side.activate()
 			return True
 
@@ -104,8 +107,9 @@ def handleCommands(comServ, coldSide, hotSide):
 					comServ.sendMessage("Must incldue temp")
 				else:
 					t = float(comArray[1])
-					coldSide.target = t
-					hotSide.target = t
+					targetTemp = t 
+					coldSide.target = targetTemp
+					hotSide.target = targetTemp
 					comServ.sendMessage("Temp set to "+str(t))
 					log("Temp set "+str(t))
 				
@@ -115,8 +119,9 @@ def handleCommands(comServ, coldSide, hotSide):
                                         comServ.sendMessage("Must incldue variance")
                                 else:
                                         t = float(comArray[1])
-                                        coldSide.variance = t
-                                        hotSide.variance = t
+					tempRange = t
+                                        coldSide.variance = tempRange
+                                        hotSide.variance = tempRange
                                         log("Variance set "+str(t))
 					comServ.sendMessage("Width set to "+str(t))
 			elif com == "stop":
@@ -148,6 +153,8 @@ def handleCommands(comServ, coldSide, hotSide):
 		traceback.print_exc(file=sys.stdout)
 
 
+
+
 commandServer = myServer(logging)
 
 try:
@@ -156,9 +163,9 @@ try:
 	currAirTemp = getTemp(airProbe)
 	currBeerTemp = getTemp(beerProbe)
 	currTime = int(time.time())
-	coldSide.setUpdateValues(currTime, currAirTemp)
-	hotSide.setUpdateValues(currTime, currAirTemp)
-	
+	coldSide.setUpdateValues(currTime, currAirTemp, currBeerTemp)
+	hotSide.setUpdateValues(currTime, currAirTemp, currBeerTemp)
+
 	handleCommands(commandServer, coldSide, hotSide)
 	if stop:
 		if coldSide.active:
