@@ -63,7 +63,8 @@ class Side:
 		self.cutOff = 0
 		self.target = 0
 		self.variance = 0
-		self.active = False;
+		self.active = False
+		self.enabled = True
 		self.logger = logger
 	
 
@@ -79,6 +80,7 @@ class Side:
 		report += "AvgCycleTime: "+str(self.cycle.avgCycleTime())+" "
 		report += "AvgCycleChange: "+str(self.cycle.avgCycleTempChange())+" "
 		report += "AvgRateChange: "+str(self.cycle.avgTempChangeRate())+" "
+		report += "Enabled: "+str(self.enabled)+" "
 		return report
 		
 
@@ -160,6 +162,8 @@ class Side:
 		if self.target == 0:
 			print "Activate not set!"
 			return False
+		if not self.enabled:
+			return False
 		#adjustedTargetTemp = self.getFastAdjustedTargetTemp()
 		return self.mySide*(adjustedTargetTemp - self.currTemp) > self.variance and not(self.active)
 
@@ -167,6 +171,8 @@ class Side:
 
 	def shouldDeactivate(self, adjustedTargetTemp):
 		#adjustedTargetTemp = self.getFastAdjustedTargetTemp()
+		if not self.enabled:
+			return True
 		return (-1*self.mySide)*(adjustedTargetTemp-self.currTemp) >= (self.variance - self.cutOff) and (self.active)#using the inverse to persist var-cutoff form
 		
 

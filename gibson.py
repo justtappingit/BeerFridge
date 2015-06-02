@@ -12,8 +12,8 @@ from side import Side
 logging.basicConfig(filename="/home/pi/beer_fridge/logFile.log",level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-targetTemp = 66 
-graceDistance = .75		#Temp to turn off the elements inside of bands 
+targetTemp = 65 
+graceDistance = 1.0		#Temp to turn off the elements inside of bands!! set aggresive for follow through!
 tempRange = 1		#Bracket of acceptable air temp	
 
 heatRelay = 27 #GPIO pin number
@@ -72,8 +72,11 @@ def runSide(side, otherSide):
 
 	else:
 		if side.shouldActivate(adjustedTarget):
-			if side.getDownTime() < 10:
+			if side.getDownTime() < 60:
 				log("WARNING "+side.name+" is attempting to flash "+str(side.currTime)+" "+str(side.cycle.stopTime))
+				return True
+			if otherSide.getDownTime() < 120:
+				log("WARNING "+side.name+" is attempting to immediately activate after other side, 2 min cool down "+str(side.currTime))
 				return True
 			if otherSide.active:
 				log("WARNING "+side.name+" activating with other side on, turning off other side")
@@ -84,7 +87,7 @@ def runSide(side, otherSide):
 
 def getReport(coldSide, hotSide):
 	report =""
-	report += "CurrTemp: "+str(coldSide.currTemp)+"\n"
+	report += "CurrTemp: "+str(coldSide.currTemp)+" BeerTemp: "+str(coldSide.beerTemp)+"\n"
 	report += "Cold: \n"+coldSide.getReport()+"\n"
 	report += "Hot: \n"+hotSide.getReport()+"\n"
 	report +="Stopped: "+str(stop)+" "
@@ -101,7 +104,7 @@ def handleCommands(comServ, coldSide, hotSide):
 			if len(comArray) == 0:
 				log("Bad command parse")
 				continue
-			com = str(comArray[0].strip())
+			com = str(comArray[0].strip()).lower()
 			if com == "r" or com =="d":
 				log("Report")
 				r = ""
@@ -134,14 +137,45 @@ def handleCommands(comServ, coldSide, hotSide):
                                         hotSide.variance = tempRange
                                         log("Variance set "+str(t))
 					comServ.sendMessage("Width set to "+str(t))
+			elif com == "eside":
+				log("Set enable side")
+				if len(comArray) < 2:
+					comServ.sendMessage("Must include HOT or COLD")
+				else:
+					s = str(comArray[1]).upper()
+					if s == "HOT":
+						hotSide.enabled = True
+						comServ.sendMessage("Hot side enabled")
+					elif s == "COLD":
+						coldSide.enabled = True
+						comServ.sendMessage("Cold side enabled")
+					else:
+						comServ.sendMessage("Unknown side")
+			elif com == "dside":
+				log("Set disable side")
+				if len(comArray) < 2:
+					comServ.sendMessage("Must include HOT or COLD")
+				else:
+					s = str(comArray[1]).upper()
+					if s == "HOT":
+						hotSide.enabled = False
+						comServ.sendMessage("Hot side disabled")
+					elif s == "COLD":
+						coldSide.enabled = False
+						comServ.sendMessage("Cold side disabled")
+					else:
+						comServ.sendMessage("Unknown side")
 			elif com == "stop":
 				log("Stopping from command")
+				coldSide.deactivate()
+				hotSide.deactivate()
 				stop= True
 				comServ.sendMessage("Stopping")
 			elif com == "start":
 				log("Starting from command")
 				stop = False
 				comServ.sendMessage("Starting")
+		
 				
 			elif com == "?":
 				log("Command list")
@@ -153,6 +187,8 @@ def handleCommands(comServ, coldSide, hotSide):
 				s+="w [width] (set the variance width in degreess to width)\n"
 				s+="stop (stop heating and cooling, shut off relays)\n"
 				s+="start (start heating cooling)\n"
+				s+="eside [side] (enable side hot/cold)\n"
+				s+="dside [side] (disable side hot/cold)\n"
 				comServ.sendMessage(s)
 			else:
 				log("unknown command: "+com)
@@ -161,6 +197,7 @@ def handleCommands(comServ, coldSide, hotSide):
 		log("Bad command! ")
 		log(str(sys.exc_info()[0]))
 		traceback.print_exc(file=sys.stdout)
+		comServ.sendMessage("BAD COMMAND!")
 
 
 

@@ -26,10 +26,16 @@ class myServer(threading.Thread):
 		self.connections = {}
 		self.checkConns = True
 		self.acceptThread = threading.Thread(target=self.acceptConnections)
+		self.commandThread = threading.Thread(target=self.readFromCommandLine)
 		self.connLock = threading.Lock()
 		self.commands = deque("") #This is suppose to be a thread safe object
 		self.logging = logging
 		
+	def readFromCommandLine(self):
+		while self.checkConns:
+			d = raw_input().strip()
+			self.commands.append(d)		
+	
 	def acceptConnections(self):
 		while self.checkConns:
 	                conn, addr = self.sock.accept()
@@ -67,6 +73,7 @@ class myServer(threading.Thread):
 		self.sock.bind((self.HOST, self.PORT))
 		self.sock.listen(5)
 		self.acceptThread.start()
+		self.commandThread.start()
 		while self.checkConns:
 
 			if len(self.connections.keys()) == 0:
