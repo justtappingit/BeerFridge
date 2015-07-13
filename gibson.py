@@ -3,18 +3,19 @@ import time
 import sys,traceback
 import logging
 import math
+import os
 
 from command_server import myServer
-from side import Side
+from side import Side,RunStatus
 #/sys/bus/w1/devices/28-0000066eb94b/value #air temp
 #/sys/bus/w1/devices/28-00000670579a/value #beer temp
 
 logging.basicConfig(filename="/home/pi/beer_fridge/logFile.log",level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-targetTemp = 65 
-graceDistance = 1.0		#Temp to turn off the elements inside of bands!! set aggresive for follow through!
-tempRange = 1		#Bracket of acceptable air temp	
+targetTemp = 71 
+graceDistance = .75		#Temp to turn off the elements inside of bands!!
+tempRange = 1.5	#Bracket of acceptable air temp	
 
 heatRelay = 27 #GPIO pin number
 coldRelay = 17 #GPIO pin number
@@ -22,11 +23,9 @@ coldRelay = 17 #GPIO pin number
 coldSide = Side("COLD",-1, coldRelay, logger)
 hotSide = Side("HOT",1, heatRelay, logger)
 
+runStatus = RunStatus()
 coldSide.setTempBands(targetTemp, tempRange, graceDistance) #Set initial temperature rules, can change during cycle
 hotSide.setTempBands(targetTemp, tempRange, graceDistance)
-
-run = True
-stop = False
 
 airProbe = "28-0000066eb94b" #Serial number for temp sensor
 beerProbe = "28-00000670579a" #Serial number for temp sensor
@@ -72,8 +71,8 @@ def runSide(side, otherSide):
 
 	else:
 		if side.shouldActivate(adjustedTarget):
-			if side.getDownTime() < 60:
-				log("WARNING "+side.name+" is attempting to flash "+str(side.currTime)+" "+str(side.cycle.stopTime))
+			if side.getDownTime() < 300:
+				log("WARNING "+side.name+" is attempting to flash (5 mins) "+str(side.currTime)+" "+str(side.cycle.stopTime))
 				return True
 			if otherSide.getDownTime() < 120:
 				log("WARNING "+side.name+" is attempting to immediately activate after other side, 2 min cool down "+str(side.currTime))
@@ -90,12 +89,11 @@ def getReport(coldSide, hotSide):
 	report += "CurrTemp: "+str(coldSide.currTemp)+" BeerTemp: "+str(coldSide.beerTemp)+"\n"
 	report += "Cold: \n"+coldSide.getReport()+"\n"
 	report += "Hot: \n"+hotSide.getReport()+"\n"
-	report +="Stopped: "+str(stop)+" "
+	report +="Stopped: "+str(runStatus.stop)+" "
 	report += "LastAction Mins ago: "+str((coldSide.currTime-max(coldSide.getLastOff(), hotSide.getLastOff()))/60)
 	return report
 
 def handleCommands(comServ, coldSide, hotSide):
-	global run, stop
 	try:
 		while len(comServ.commands) > 0:
 			command  = comServ.commands.popleft().strip()
@@ -111,9 +109,9 @@ def handleCommands(comServ, coldSide, hotSide):
 				r = getReport(coldSide, hotSide)
 				log(r)
 				comServ.sendMessage(r)
-			elif com == "D":
+			elif com == "q":
 				log("Disable")
-				run = False
+				runStatus.run = False
 			elif com == "set":
 				log("Set temp")
 				if len(comArray) < 2:
@@ -169,11 +167,11 @@ def handleCommands(comServ, coldSide, hotSide):
 				log("Stopping from command")
 				coldSide.deactivate()
 				hotSide.deactivate()
-				stop= True
+				runStatus.stop= True
 				comServ.sendMessage("Stopping")
 			elif com == "start":
 				log("Starting from command")
-				stop = False
+				runStatus.stop = False
 				comServ.sendMessage("Starting")
 		
 				
@@ -182,7 +180,7 @@ def handleCommands(comServ, coldSide, hotSide):
 				s=""
 				s+="r (report status of heating cooling temp and settings)\n"
 				s+="d (report status of heating cooling temp and settings)\n"
-				s+="D (disable and shut down)\n"
+				s+="q (disable and shut down)\n"
 				s+="set [temp] (change the target tempature to temp)\n"
 				s+="w [width] (set the variance width in degreess to width)\n"
 				s+="stop (stop heating and cooling, shut off relays)\n"
@@ -190,6 +188,7 @@ def handleCommands(comServ, coldSide, hotSide):
 				s+="eside [side] (enable side hot/cold)\n"
 				s+="dside [side] (disable side hot/cold)\n"
 				comServ.sendMessage(s)
+				log(s)
 			else:
 				log("unknown command: "+com)
 
@@ -206,7 +205,7 @@ commandServer = myServer(logging)
 
 try:
  commandServer.start()
- while(run):
+ while(runStatus.run):
 	currAirTemp = getTemp(airProbe)
 	currBeerTemp = getTemp(beerProbe)
 	currTime = int(time.time())
@@ -214,7 +213,7 @@ try:
 	hotSide.setUpdateValues(currTime, currAirTemp, currBeerTemp)
 
 	handleCommands(commandServer, coldSide, hotSide)
-	if stop:
+	if runStatus.stop:
 		if coldSide.active:
 			coolSide.deactivate()
 		if hotSide.active:
@@ -224,11 +223,11 @@ try:
 		continue
 	if coldSide.active and hotSide.active:
 		log("You royally messed up!")
-		run = False
+		runStatus.run = False
 		continue
 	if not (coldSide.stateSync() and hotSide.stateSync()):
 		log("State and side class out of sync shutting down" + str(coldSide.active)+" "+str(coldSide.relayState)+" "+str(hotSide.active)+" "+str(hotSide.relayState))
-		run = False
+		runStatus.run = False
 		continue
 
 
@@ -247,6 +246,9 @@ except: #Catch everything we can so we gracefully shutdown
  traceback.print_exc(file=sys.stdout)
  allOff()
  commandServer.shutdown()
+ log(str(sys.exc_info()[0]))
+ print "Attempting to send warning email"
+ os.popen("echo \"Beer fridge has shutdown! Check log for details.\" |mail -s \"Beer Fridge Exception!\" nope@gmail.com")
  
 
 allOff() # Program end turn off everyhing

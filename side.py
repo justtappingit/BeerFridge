@@ -1,6 +1,14 @@
 #! /usr/bin/python
 import math
 import time
+
+class RunStatus:
+	run = True
+	stop = False
+
+	def __init__(self):
+		pass
+
 class Cycle:
 	count = 0
 	startTemp = 0
@@ -148,9 +156,9 @@ class Side:
 				adjust= 0
                 adjustedTargetTemp = self.target + (self.mySide * adjust) #calc target air temp
 		#Safety checks----
-                if adjustedTargetTemp < 28:
-                        self.log("WARNING ADJUSTED TEMP BELOW 28!!!! "+self.name)
-                        adjustedTargetTemp = 28
+                if adjustedTargetTemp < 20:
+                        self.log("WARNING ADJUSTED TEMP BELOW 20!!!! "+self.name)
+                        adjustedTargetTemp = 20
                 if adjustedTargetTemp > 105 :
                         self.log("WARNING ADJUSTED TEMP ABOVE 105!!!! " +self.name)
                         adjustedTargetTemp = 105
